@@ -295,10 +295,14 @@ func privateNew(endpoint string, opts *Options) (*Client, error) {
 
 	clnt.httpTrace = opts.Trace
 
-	// Instantiate http client and bucket location cache.
+	// Instantiate http client and bucket location cache. The transport is
+	// wrapped once, here, so follow scopes can pin a connection on the
+	// regular dial/send path without ever swapping the client transport or
+	// disturbing the shared pool: requests outside a scope are delegated
+	// verbatim.
 	clnt.httpClient = &http.Client{
 		Jar:       jar,
-		Transport: transport,
+		Transport: newFollowTransport(transport),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -765,6 +769,12 @@ func (c *Client) executeMethod(ctx context.Context, method string, metadata requ
 		// Initiate the request.
 		res, err = c.do(req)
 		if err != nil {
+			if isFollowFatal(err) {
+				// Inside a follow scope the bound connection broke or this
+				// hop would switch endpoint/transport/TLS: fail the
+				// operation now, never reconnect or retry on another link.
+				return nil, err
+			}
 			if isRequestErrorRetryable(ctx, err) {
 				// Retry the request
 				continue

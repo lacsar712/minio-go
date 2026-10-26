@@ -102,6 +102,12 @@ func (c *Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketN
 	if err = s3utils.CheckValidObjectName(objectName); err != nil {
 		return UploadInfo{}, err
 	}
+	// Parts are uploaded by several workers in parallel; a follow scope
+	// allows only the one bound connection, so fail up front instead of
+	// spreading parts across connections.
+	if followActive(ctx) {
+		return UploadInfo{}, ErrFollowConcurrent
+	}
 
 	// Calculate the optimal parts info for a given size.
 	totalPartsCount, partSize, lastPartSize, err := c.optimalPartInfo(size, opts.PartSize)
@@ -461,6 +467,10 @@ func (c *Client) putObjectMultipartStreamParallel(ctx context.Context, bucketNam
 
 	if err = s3utils.CheckValidObjectName(objectName); err != nil {
 		return UploadInfo{}, err
+	}
+	// Concurrent part uploads cannot share the single bound connection.
+	if followActive(ctx) {
+		return UploadInfo{}, ErrFollowConcurrent
 	}
 
 	// Cancel all when an error occurs.

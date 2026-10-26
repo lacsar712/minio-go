@@ -50,6 +50,11 @@ func (r parallelGetReader) Close() error {
 // its ETag, falling back to a single GET when it fits in one chunk or has
 // no ETag.
 func (c *Client) getObjectParallel(ctx context.Context, bucketName, objectName string, opts GetObjectOptions) (io.ReadCloser, ObjectInfo, error) {
+	// Parallel ranged GETs cannot stay on the single bound connection of a
+	// follow scope; fail before the stat and fan-out start.
+	if followActive(ctx) {
+		return nil, ObjectInfo{}, ErrFollowConcurrent
+	}
 	objectInfo, err := c.StatObject(ctx, bucketName, objectName, opts)
 	if err != nil {
 		return nil, ObjectInfo{}, err
